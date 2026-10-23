@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Advanced Cyber Hand-Tracking Interface</title>
+
+    <!-- Pustaka MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --neon-green: #00ff66;
+            --neon-purple: #bd00ff;
+            --neon-orange: #ff6600;
+            --bg-dark: #0a0a12;
+            --panel-bg: rgba(16, 16, 28, 0.85);
+            --border-glow: rgba(0, 255, 102, 0.2);
+        }
+
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg-dark);
+            color: #ffffff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex; flex-direction: column;
+            align-items: center; min-height: 100vh;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+
+        header {
+            width: 90%; margin-top: 10px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--border-glow); padding-bottom: 5px;
+        }
+
+        .brand-title { font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+        .brand-title span { color: var(--neon-green); }
+
+        .main-layout {
+            display: flex; flex-direction: column;
+            width: 95%; gap: 10px; margin-top: 10px;
+            flex-grow: 1;
+        }
+
+        .viewport-container {
+            position: relative; width: 100%; height: 50vh; max-height: 400px;
+            background: #000; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1); overflow: hidden;
+        }
+
+        #webcam, #output {
+            position: absolute; width: 100%; height: 100%;
+            object-fit: cover; transform: scaleX(-1);
+        }
+        #webcam { opacity: 0; }
+        #output { z-index: 2; pointer-events: none; }
+
+        .panel {
+            background: var(--panel-bg); border-radius: 8px; padding: 12px;
+            box-shadow: inset 0 0 15px rgba(255,255,255,0.02);
+        }
+
+        .panel-title {
+            font-size: 11px; font-weight: bold; text-transform: uppercase;
+            margin-bottom: 8px; border-left: 3px solid var(--neon-orange); padding-left: 8px;
+        }
+
+        .telemetry-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 11px;
+        }
+        .telemetry-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .telemetry-val { color: var(--neon-orange); font-weight: bold; }
+
+        .translation-display {
+            background: rgba(16, 16, 28, 0.95); border: 1px solid rgba(0, 255, 102, 0.3);
+            border-radius: 6px; padding: 15px; margin-top: 10px; margin-bottom: 10px;
+            width: 90%; text-align: center;
+        }
+        .hud-label { font-size: 10px; text-transform: uppercase; color: #667; }
+        #translated-output { font-size: 18px; font-weight: bold; color: var(--neon-green); margin-top: 5px; }
+
+        .creator-tag {
+            font-size: 9px; color: #556; text-transform: uppercase;
+            text-align: center; margin-bottom: 15px; width: 100%;
+        }
+        .creator-tag span { color: #889; font-weight: bold; }
+
+        #loader {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: var(--bg-dark); z-index: 10;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+        .radar-spinner {
+            width: 40px; height: 40px; border: 2px solid transparent;
+            border-top-color: var(--neon-green); border-bottom-color: var(--neon-orange);
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #loader-text { margin-top: 15px; font-size: 10px; color: #889; text-transform: uppercase; text-align: center; padding: 0 10px; }
+        #permission-screen {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: var(--bg-dark); z-index: 20;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            text-align: center; padding: 0 15px; box-sizing: border-box;
+        }
+        .perm-icon { font-size: 40px; margin-bottom: 10px; }
+        .perm-text { font-size: 12px; color: #889; margin-bottom: 18px; line-height: 1.5; }
+        #btn-permission {
+            background: transparent; color: var(--neon-green);
+            border: 2px solid var(--neon-green); border-radius: 6px;
+            padding: 12px 24px; font-family: inherit; font-size: 14px; font-weight: bold;
+            text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+            box-shadow: 0 0 12px rgba(0,255,102,0.35);
+            transition: background 0.2s, color 0.2s;
+        }
+        #btn-permission:active { background: var(--neon-green); color: #000; }
+        .perm-buttons { display: flex; gap: 12px; }
+        #btn-deny {
+            background: transparent; color: var(--neon-orange);
+            border: 2px solid var(--neon-orange); border-radius: 6px;
+            padding: 12px 24px; font-family: inherit; font-size: 14px; font-weight: bold;
+            text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+            box-shadow: 0 0 12px rgba(255,102,0,0.3);
+            transition: background 0.2s, color 0.2s;
+        }
+        #btn-deny:active { background: var(--neon-orange); color: #000; }
+        #perm-error { margin-top: 14px; font-size: 11px; color: var(--neon-orange); display: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand-title">CORE: <span>TRACK_INTERFACE</span></div>
+    </header>
+
+    <div class="main-layout">
+        <div class="viewport-container">
+            <div id="permission-screen">
+                <div class="perm-icon">
+                    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#00ff66" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 6px rgba(0,255,102,0.6));">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                </div>
+                <div class="perm-text">Aplikasi ini membutuhkan akses kamera<br>untuk mendeteksi gerakan tangan Anda.</div>
+                <div class="perm-buttons">
+                    <button id="btn-permission">Izinkan</button>
+                    <button id="btn-deny">Tolak</button>
+                </div>
+                <div id="perm-error"></div>
+            </div>
+            <div id="loader" style="display:none;">
+                <div class="radar-spinner"></div>
+                <div id="loader-text">Memuat Kecerdasan Buatan (AI)... Pastikan Internet Aktif</div>
+            </div>
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="output"></canvas>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Sistem Telemetri</div>
+            <div class="telemetry-grid">
+                <div class="telemetry-row"><span>FPS:</span> <span id="val-fps" class="telemetry-val">00</span></div>
+                <div class="telemetry-row"><span>DELAY:</span> <span id="val-lat" class="telemetry-val">00 ms</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="translation-display">
+        <div class="hud-label">HASIL EVALUASI TERJEMAHAN</div>
+        <div id="translated-output">MENUNGGU DETEKSI TANGAN...</div>
+    </div>
+
+    <div class="creator-tag">
+        PENCIPTA: <span>CHRISTIAN RAFAEL SIMANJUNTAK</span>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d');
+
+        const displayOutput = document.getElementById('translated-output');
+        const fpsOutput = document.getElementById('val-fps');
+        const latOutput = document.getElementById('val-lat');
+        const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loader-text');
+
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let fps = 0;
+        let colorTick = 0;
+        let currentDynamicColor = '#00ff66';
+        let particles = [];
+        let sendStart = 0;
+
+        function updateDynamicColor() {
+            colorTick += 1;
+            if (colorTick % 90 < 30) currentDynamicColor = '#00ff66';
+            else if (colorTick % 90 < 60) currentDynamicColor = '#bd00ff';
+            else currentDynamicColor = '#ff6600';
+        }
+
+        function spawnParticle(x, y, color) {
+            for (let i = 0; i < 2; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: (Math.random() - 0.5) * 3 - 0.5,
+                    alpha: 1,
+                    size: Math.random() * 2 + 1.5,
+                    color: color
+                });
+            }
+        }
+
+        function updateAndDrawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.alpha -= 0.04;
+                if (p.alpha <= 0) { particles.splice(i, 1); continue; }
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function evaluateHandSign(landmarks) {
+            const fingers = [
+                { tip: 8, pip: 6 }, { tip: 12, pip: 10 }, { tip: 16, pip: 14 }, { tip: 20, pip: 18 }
+            ];
+            let upFingers = fingers.map(f => landmarks[f.tip].y < landmarks[f.pip].y);
+            const isThumbUp = landmarks[4].y < landmarks[3].y && landmarks[4].y < landmarks[2].y;
+            const isThumbOut = Math.abs(landmarks[4].x - landmarks[2].x) > 0.05;
+            const totalFingersUp = upFingers.filter(Boolean).length;
+
+            if (totalFingersUp === 0 && !isThumbUp) return "GENGGAMAN (HURUF A)";
+            if (totalFingersUp === 0 && isThumbUp) return "JEMPOL MANTAP";
+            if (upFingers[0] && !upFingers[1] && !upFingers[2] && upFingers[3] && isThumbOut) return "I LOVE YOU SIGN";
+            if (totalFingersUp === 4 && isThumbOut) return "TERBUKA (ANGKA 5)";
+            if (totalFingersUp === 4 && !isThumbOut) return "ANGKA 4";
+            if (upFingers[0] && upFingers[1] && upFingers[2] && !upFingers[3]) return "ANGKA 3";
+            if (upFingers[0] && upFingers[1] && !upFingers[2] && !upFingers[3]) return "PEACE / ANGKA 2";
+            if (upFingers[0] && !upFingers[1] && !upFingers[2] && !upFingers[3]) return "TELUNJUK (ANGKA 1)";
+            return "MENELUSURI POSISI...";
+        }
+
+        function onResults(results) {
+            // Sembunyikan loader setelah hasil pertama
+            if (loader.style.display !== 'none') loader.style.display = 'none';
+
+            // Sesuaikan ukuran canvas dengan resolusi video
+            if (canvas.width !== results.image.width || canvas.height !== results.image.height) {
+                canvas.width = results.image.width;
+                canvas.height = results.image.height;
+            }
+
+            // FPS
+            frameCount++;
+            const now = performance.now();
+            if (now >= lastFrameTime + 1000) {
+                fps = Math.round((frameCount * 1000) / (now - lastFrameTime));
+                fpsOutput.innerText = fps.toString().padStart(2, '0');
+                frameCount = 0; lastFrameTime = now;
+            }
+            // Delay = waktu pemrosesan satu frame
+            if (sendStart) latOutput.innerText = `${Math.round(now - sendStart)} ms`;
+
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+            updateDynamicColor();
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                let labels = [];
+
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Garis & titik kerangka tangan
+                    drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: currentDynamicColor, lineWidth: 3 });
+                    drawLandmarks(ctx, landmarks, { color: '#ffffff', fillColor: currentDynamicColor, lineWidth: 1, radius: 3 });
+
+                    // Partikel di ujung jari
+                    const tipIDs = [4, 8, 12, 16, 20];
+                    tipIDs.forEach(id => {
+                        let ptX = landmarks[id].x * canvas.width;
+                        let ptY = landmarks[id].y * canvas.height;
+                        spawnParticle(ptX, ptY, currentDynamicColor);
+                    });
+
+                    labels.push(evaluateHandSign(landmarks));
+                }
+
+                displayOutput.innerText = labels.join("  |  ");
+            } else {
+                displayOutput.innerText = "MENUNGGU DETEKSI TANGAN...";
+            }
+
+            updateAndDrawParticles();
+            ctx.restore();
+        }
+
+        // Inisialisasi MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.6
+        });
+        hands.onResults(onResults);
+
+        // Kamera
+        const camera = new Camera(video, {
+            onFrame: async () => {
+                sendStart = performance.now();
+                await hands.send({ image: video });
+            },
+            width: 640,
+            height: 480,
+            facingMode: 'user'
+        });
+
+        // Kamera baru dinyalakan setelah tombol "Izinkan Kamera" ditekan
+        const permScreen = document.getElementById('permission-screen');
+        const btnPermission = document.getElementById('btn-permission');
+        const permError = document.getElementById('perm-error');
+
+        // Pilihan 2: Tolak -> kamera tidak muncul, izin tetap wajib
+        document.getElementById('btn-deny').addEventListener('click', () => {
+            permError.innerText = 'Kamera tidak diaktifkan. Anda harus menekan "Izinkan" agar kamera dan deteksi tangan bisa berjalan.';
+            permError.style.display = 'block';
+        });
+
+        // Pilihan 1: Izinkan -> minta izin browser, jika berhasil kamera muncul
+        btnPermission.addEventListener('click', async () => {
+            btnPermission.disabled = true;
+            btnPermission.innerText = 'Meminta izin...';
+            permError.style.display = 'none';
+            try {
+                // Memunculkan dialog izin kamera dari browser
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                stream.getTracks().forEach(t => t.stop()); // izin didapat, lepas dulu agar Camera util mengambil alih
+
+                permScreen.style.display = 'none';
+                loader.style.display = 'flex';
+                await camera.start();
+            } catch (err) {
+                console.error(err);
+                btnPermission.disabled = false;
+                btnPermission.innerText = 'Izinkan';
+                loader.style.display = 'none';
+                permScreen.style.display = 'flex';
+                permError.innerText = 'Izin kamera ditolak atau kamera tidak tersedia. Aktifkan izin kamera di pengaturan browser lalu tekan tombol lagi.';
+                permError.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
